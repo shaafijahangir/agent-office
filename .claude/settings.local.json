@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(sqlite3:*)",
+      "Bash(npm run:*)",
+      "Bash(tasklist)",
+      "Bash(wmic process:*)",
+      "Bash(taskkill //PID 36080 //F)",
+      "Bash(taskkill //PID 35476 //F)",
+      "Bash(node dist/index.js)",
+      "Bash(taskkill:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx vite:*)",
+      "Bash(node -e \":*)",
+      "Bash(netstat -ano)",
+      "Bash(findstr 3000)"
+    ]
+  }
+}
