@@ -8,6 +8,7 @@ export class AgentState extends Schema {
     @type('string') direction: 'up' | 'down' | 'left' | 'right';
     @type('string') action: string;
     @type('string') currentTask: string;
+    @type('string') taskStage: string;
     @type('string') thought: string;
 
     constructor(id: string, name: string) {
@@ -19,6 +20,7 @@ export class AgentState extends Schema {
         this.direction = 'down';
         this.action = 'idle';
         this.currentTask = '';
+        this.taskStage = '';
         this.thought = '';
     }
 }
@@ -27,6 +29,7 @@ export class OfficeState extends Schema {
     @type({ map: AgentState }) agents = new MapSchema<AgentState>();
     @type('string') officeTime: string = new Date().toISOString();
     @type('number') timeScale: number = 1;
+    @type('boolean') paused: boolean = false; // Agents run by default — frontend is an observer
 
     createAgent(id: string, name: string) {
         this.agents.set(id, new AgentState(id, name));

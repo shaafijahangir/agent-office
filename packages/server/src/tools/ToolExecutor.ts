@@ -18,6 +18,23 @@ export class ToolExecutor {
                 return this.writeNote(params.content);
             case 'read_file':
                 return this.readFile(params.path);
+            // Tech Team tools
+            case 'code_review':
+                return this.codeReview(params.code);
+            case 'architecture_plan':
+                return this.architecturePlan(params.requirements);
+            // Sales Team tools
+            case 'market_research':
+                return this.marketResearch(params.query);
+            case 'draft_outreach':
+                return this.draftOutreach(params.target, params.product);
+            // Business Team tools
+            case 'financial_model':
+                return this.financialModel(params.revenue, params.costs, params.months);
+            case 'write_report':
+                return this.writeReport(params.topic, params.findings);
+            case 'risk_analysis':
+                return this.riskAnalysis(params.scenario);
             default:
                 return { success: false, output: '', error: `Unknown tool: ${toolName}` };
         }
@@ -78,7 +95,7 @@ export class ToolExecutor {
     }
 
     private async writeNote(content: string): Promise<ToolResult> {
-        // Simple in-memory note (could be extended to file I/O)
+        if (!content) return { success: false, output: '', error: 'No content provided for note.' };
         console.log(`[ToolExecutor] Note: ${content}`);
         return { success: true, output: `Note saved: "${content.slice(0, 50)}..."` };
     }
@@ -95,5 +112,166 @@ export class ToolExecutor {
         } catch (e: any) {
             return { success: false, output: '', error: e.message };
         }
+    }
+
+    // ─── TECH TEAM TOOLS ───
+
+    private async codeReview(code: string): Promise<ToolResult> {
+        if (!code) return { success: false, output: '', error: 'No code provided for review.' };
+        const review = [
+            `CODE REVIEW`,
+            `─────────────────────────`,
+            `Lines: ~${code.split('\n').length}`,
+            ``,
+            `Snippet:`,
+            code.slice(0, 300),
+            ``,
+            `Review Notes:`,
+            `- Structure: Analyzed`,
+            `- Complexity: Assessed`,
+            `- Suggestions: Ready for discussion`,
+            ``,
+            `(Full analysis provided in agent's thought process)`
+        ].join('\n');
+        return { success: true, output: review };
+    }
+
+    private async architecturePlan(requirements: string): Promise<ToolResult> {
+        if (!requirements) return { success: false, output: '', error: 'No requirements provided.' };
+        const plan = [
+            `ARCHITECTURE PLAN`,
+            `─────────────────────────`,
+            `Requirements: ${requirements.slice(0, 200)}`,
+            ``,
+            `Components to define:`,
+            `- Frontend layer`,
+            `- API / Backend services`,
+            `- Database / Storage`,
+            `- Infrastructure / Hosting`,
+            `- Third-party integrations`,
+            ``,
+            `(Detailed architecture in agent's analysis)`
+        ].join('\n');
+        return { success: true, output: plan };
+    }
+
+    // ─── SALES TEAM TOOLS ───
+
+    private async marketResearch(query: string): Promise<ToolResult> {
+        // Enhanced web search formatted as market intel
+        const searchResult = await this.webSearch(query);
+        if (!searchResult.success) return searchResult;
+
+        const report = [
+            `MARKET RESEARCH REPORT`,
+            `─────────────────────────`,
+            `Query: ${query}`,
+            ``,
+            `Findings:`,
+            searchResult.output,
+            ``,
+            `Analysis Areas:`,
+            `- Market size & growth`,
+            `- Key players & competitors`,
+            `- Trends & opportunities`,
+            `- Customer segments`,
+            ``,
+            `(Strategic insights in agent's analysis)`
+        ].join('\n');
+        return { success: true, output: report };
+    }
+
+    private async draftOutreach(target: string, product: string): Promise<ToolResult> {
+        if (!target || !product) return { success: false, output: '', error: 'Need target and product params.' };
+        const draft = [
+            `OUTREACH DRAFT`,
+            `─────────────────────────`,
+            `Target: ${target}`,
+            `Product: ${product}`,
+            ``,
+            `Template:`,
+            `Subject: How ${product} can help ${target}`,
+            ``,
+            `Hi [Name],`,
+            ``,
+            `I noticed [specific observation about ${target}].`,
+            `We built ${product} to solve exactly this — [value prop].`,
+            ``,
+            `Would you be open to a 15-min call this week?`,
+            ``,
+            `(Agent will customize based on context)`
+        ].join('\n');
+        return { success: true, output: draft };
+    }
+
+    // ─── BUSINESS TEAM TOOLS ───
+
+    private async financialModel(revenue: number, costs: number, months: number): Promise<ToolResult> {
+        const r = revenue || 0;
+        const c = costs || 0;
+        const m = months || 12;
+        const rows: string[] = [
+            `FINANCIAL PROJECTION`,
+            `─────────────────────────`,
+            `Month | Revenue | Costs | Net | Cumulative`,
+        ];
+        let cumulative = 0;
+        for (let i = 1; i <= Math.min(m, 12); i++) {
+            const monthRevenue = Math.round(r * (1 + (i - 1) * 0.15)); // 15% MoM growth
+            const monthCosts = Math.round(c * (1 + (i - 1) * 0.05)); // 5% MoM cost increase
+            const net = monthRevenue - monthCosts;
+            cumulative += net;
+            rows.push(`  ${String(i).padStart(2)}   | $${String(monthRevenue).padStart(7)} | $${String(monthCosts).padStart(7)} | $${String(net).padStart(7)} | $${String(cumulative).padStart(8)}`);
+        }
+        rows.push(``, `Assumptions: 15% MoM revenue growth, 5% MoM cost growth`);
+        return { success: true, output: rows.join('\n') };
+    }
+
+    private async writeReport(topic: string, findings: string): Promise<ToolResult> {
+        if (!topic) return { success: false, output: '', error: 'No topic provided.' };
+        const report = [
+            `BUSINESS REPORT`,
+            `═════════════════════════`,
+            `Topic: ${topic}`,
+            `Date: ${new Date().toLocaleDateString()}`,
+            ``,
+            `Executive Summary:`,
+            `(To be completed by agent)`,
+            ``,
+            `Key Findings:`,
+            findings ? findings.slice(0, 500) : '(Pending analysis)',
+            ``,
+            `Recommendations:`,
+            `(To be completed by agent)`,
+            ``,
+            `Next Steps:`,
+            `(To be completed by agent)`
+        ].join('\n');
+        return { success: true, output: report };
+    }
+
+    private async riskAnalysis(scenario: string): Promise<ToolResult> {
+        if (!scenario) return { success: false, output: '', error: 'No scenario provided.' };
+        const analysis = [
+            `RISK ANALYSIS`,
+            `─────────────────────────`,
+            `Scenario: ${scenario.slice(0, 200)}`,
+            ``,
+            `Risk Matrix:`,
+            `  Impact →    Low    Medium    High`,
+            `  Likely   |   ⬜   |   🟡   |   🔴   |`,
+            `  Possible |   ⬜   |   🟡   |   🟡   |`,
+            `  Unlikely |   ⬜   |   ⬜   |   🟡   |`,
+            ``,
+            `Categories to assess:`,
+            `- Market risk`,
+            `- Technical risk`,
+            `- Financial risk`,
+            `- Operational risk`,
+            `- Competitive risk`,
+            ``,
+            `(Detailed risk scoring in agent's analysis)`
+        ].join('\n');
+        return { success: true, output: analysis };
     }
 }

@@ -60,6 +60,33 @@ export class MemoryStore {
                 name TEXT NOT NULL DEFAULT 'default',
                 updated_at TEXT DEFAULT (datetime('now'))
             );
+
+            CREATE TABLE IF NOT EXISTS conversations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                from_name TEXT NOT NULL,
+                from_id TEXT NOT NULL,
+                to_name TEXT NOT NULL,
+                to_id TEXT NOT NULL,
+                content TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_conversations_time ON conversations(timestamp DESC);
+
+            CREATE TABLE IF NOT EXISTS activity_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_id TEXT NOT NULL,
+                agent_name TEXT NOT NULL,
+                action TEXT NOT NULL,
+                thought TEXT,
+                target TEXT,
+                message TEXT,
+                tool TEXT,
+                task TEXT,
+                timestamp TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_activity_time ON activity_logs(timestamp DESC);
         `);
 
         // Migration: add embedding column to existing databases
@@ -67,6 +94,22 @@ export class MemoryStore {
             await this.db.exec('ALTER TABLE memories ADD COLUMN embedding TEXT');
         } catch {
             // Column already exists — ignore
+        }
+
+        // Migration: add task_id to conversations for topic threading
+        try { await this.db.exec('ALTER TABLE conversations ADD COLUMN task_id INTEGER'); } catch { /* exists */ }
+        try { await this.db.exec('ALTER TABLE conversations ADD COLUMN task_title TEXT'); } catch { /* exists */ }
+
+        // Migration: add task pipeline columns
+        const taskMigrations = [
+            "ALTER TABLE tasks ADD COLUMN stage TEXT DEFAULT 'pending'",
+            "ALTER TABLE tasks ADD COLUMN description TEXT",
+            "ALTER TABLE tasks ADD COLUMN deliverable TEXT",
+            "ALTER TABLE tasks ADD COLUMN reviewed_by TEXT",
+            "ALTER TABLE tasks ADD COLUMN stage_updated_at TEXT",
+        ];
+        for (const sql of taskMigrations) {
+            try { await this.db.exec(sql); } catch { /* column already exists */ }
         }
 
         console.log('[MemoryStore] SQLite initialized at', dbPath);
@@ -174,6 +217,91 @@ export class MemoryStore {
         await this.db.run("UPDATE tasks SET status = 'completed', completed_at = datetime('now') WHERE id = ?", [taskId]);
     }
 
+    async completeTaskByAgent(agentId: string): Promise<void> {
+        if (!this.db) return;
+        // Complete the oldest pending/in_progress task for this agent
+        const task = await this.db.get(
+            "SELECT id FROM tasks WHERE assigned_to = ? AND status != 'completed' ORDER BY created_at ASC LIMIT 1",
+            [agentId]
+        );
+        if (task) {
+            await this.db.run("UPDATE tasks SET status = 'completed', completed_at = datetime('now') WHERE id = ?", [task.id]);
+        }
+    }
+
+    // ─── Task Pipeline Methods ───
+
+    /** Count active (non-done) tasks for an agent */
+    async countActiveTasksByAgent(agentId: string): Promise<number> {
+        if (!this.db) return 0;
+        const row = await this.db.get(
+            "SELECT COUNT(*) as count FROM tasks WHERE assigned_to = ? AND status != 'completed' AND stage != 'done'",
+            [agentId]
+        );
+        return row?.count || 0;
+    }
+
+    /** Get the current active task for an agent (oldest non-done) */
+    async getActiveTaskForAgent(agentId: string): Promise<any | null> {
+        if (!this.db) return null;
+        return this.db.get(
+            "SELECT * FROM tasks WHERE assigned_to = ? AND status != 'completed' AND stage != 'done' ORDER BY created_at ASC LIMIT 1",
+            [agentId]
+        );
+    }
+
+    /** Create a proposed task */
+    async createProposedTask(title: string, description: string, assignedTo: string): Promise<number> {
+        if (!this.db) return -1;
+        const result = await this.db.run(
+            "INSERT INTO tasks (title, description, assigned_to, status, stage, stage_updated_at) VALUES (?, ?, ?, 'in_progress', 'proposed', datetime('now'))",
+            [title, description, assignedTo]
+        );
+        return result.lastID || -1;
+    }
+
+    /** Advance task to the next stage. Returns the new stage or null if already done. */
+    async advanceTaskStage(taskId: number, deliverable?: string): Promise<string | null> {
+        if (!this.db) return null;
+        const task = await this.db.get("SELECT * FROM tasks WHERE id = ?", [taskId]);
+        if (!task) return null;
+
+        const STAGE_ORDER = ['proposed', 'planned', 'implementing', 'reviewing', 'done'];
+        const currentIdx = STAGE_ORDER.indexOf(task.stage || 'proposed');
+        if (currentIdx < 0 || currentIdx >= STAGE_ORDER.length - 1) return null;
+
+        const nextStage = STAGE_ORDER[currentIdx + 1];
+
+        if (nextStage === 'done') {
+            await this.db.run(
+                "UPDATE tasks SET stage = ?, stage_updated_at = datetime('now'), deliverable = COALESCE(?, deliverable), status = 'completed', completed_at = datetime('now') WHERE id = ?",
+                [nextStage, deliverable || null, taskId]
+            );
+        } else {
+            await this.db.run(
+                "UPDATE tasks SET stage = ?, stage_updated_at = datetime('now'), deliverable = COALESCE(?, deliverable) WHERE id = ?",
+                [nextStage, deliverable || null, taskId]
+            );
+        }
+
+        return nextStage;
+    }
+
+    /** Assign a reviewer to a task */
+    async setTaskReviewer(taskId: number, reviewerId: string): Promise<void> {
+        if (!this.db) return;
+        await this.db.run("UPDATE tasks SET reviewed_by = ? WHERE id = ?", [reviewerId, taskId]);
+    }
+
+    /** Get tasks awaiting review by a specific reviewer */
+    async getTasksForReview(reviewerId: string): Promise<any[]> {
+        if (!this.db) return [];
+        return this.db.all(
+            "SELECT * FROM tasks WHERE reviewed_by = ? AND stage = 'reviewing' ORDER BY stage_updated_at ASC",
+            [reviewerId]
+        );
+    }
+
     // --- Layout Operations ---
 
     async saveLayout(name: string, layoutJson: string): Promise<void> {
@@ -190,6 +318,44 @@ export class MemoryStore {
         if (!this.db) return null;
         const row = await this.db.get('SELECT layout_json FROM office_layout WHERE name = ?', [name]);
         return row ? JSON.parse(row.layout_json) : null;
+    }
+
+    // --- Conversation Persistence ---
+
+    async saveConversation(msg: { from: string; fromId: string; to: string; toId: string; content: string; timestamp: string; taskId?: number; taskTitle?: string }): Promise<void> {
+        if (!this.db) return;
+        await this.db.run(
+            'INSERT INTO conversations (from_name, from_id, to_name, to_id, content, timestamp, task_id, task_title) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [msg.from, msg.fromId, msg.to, msg.toId, msg.content, msg.timestamp, msg.taskId || null, msg.taskTitle || null]
+        );
+    }
+
+    async getRecentConversations(limit: number = 200): Promise<any[]> {
+        if (!this.db) return [];
+        const rows = await this.db.all(
+            'SELECT from_name as "from", from_id as "fromId", to_name as "to", to_id as "toId", content, timestamp, task_id as "taskId", task_title as "taskTitle" FROM conversations ORDER BY timestamp DESC LIMIT ?',
+            [limit]
+        );
+        return rows.reverse(); // oldest first
+    }
+
+    // --- Activity Log Persistence ---
+
+    async saveActivityLog(log: { agentId: string; agentName: string; action: string; thought: string; target: string; message: string; tool: string; task: string; timestamp: string }): Promise<void> {
+        if (!this.db) return;
+        await this.db.run(
+            'INSERT INTO activity_logs (agent_id, agent_name, action, thought, target, message, tool, task, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [log.agentId, log.agentName, log.action, log.thought, log.target, log.message, log.tool, log.task, log.timestamp]
+        );
+    }
+
+    async getRecentActivityLogs(limit: number = 200): Promise<any[]> {
+        if (!this.db) return [];
+        const rows = await this.db.all(
+            'SELECT agent_id as "agentId", agent_name as "agentName", action, thought, target, message, tool, task, timestamp FROM activity_logs ORDER BY timestamp DESC LIMIT ?',
+            [limit]
+        );
+        return rows.reverse(); // oldest first
     }
 
     async close(): Promise<void> {

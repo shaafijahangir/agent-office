@@ -16,7 +16,10 @@ export class OllamaAdapter implements InferenceAdapter {
                 messages: request.messages,
                 stream: false,
                 tools: request.tools,
-                options: { temperature: request.temperature }
+                options: {
+                    temperature: request.temperature,
+                    ...(request.maxTokens ? { num_predict: request.maxTokens } : {})
+                }
             })
         });
 
